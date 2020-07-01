@@ -1,10 +1,12 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using NLog;
 using Zeebe.Client;
 using Zeebe.Client.Api.Responses;
+using Zeebe.Client.Api.Worker;
 using Zeebe.Client.Impl.Builder;
 using Zeebe.Client.Impl.Responses;
 
@@ -13,8 +15,10 @@ namespace Cloudstarter.Services
 
     public interface IZeebeService
     {
-        public Task<IDeployResponse> Deploy();
+        public void CreateGetTimeWorker();
+        public Task<IDeployResponse> Deploy(string modelFile);
         public Task<ITopology> Status();
+        public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId);
     }
     public class ZeebeService: IZeebeService
     {
@@ -49,14 +53,39 @@ namespace Cloudstarter.Services
                     .Build(); 
         }
 
-        public Task<IDeployResponse> Deploy()
+        public Task<IDeployResponse> Deploy(string modelFile)
         {
-            var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", "test-process.bpmn");
+            var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFile);
             return Client.NewDeployCommand().AddResourceFile(filename).Send();
         }
         public Task<ITopology> Status()
         {
             return Client.TopologyRequest().Send();
+        }
+
+        public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId)
+        {
+            return Client.NewCreateWorkflowInstanceCommand().BpmnProcessId(bpmProcessId).LatestVersion().Send();
+        }
+
+        public void CreateGetTimeWorker()
+        {
+            _createWorker("get-time", (client, job) =>
+            {
+                Console.Out.WriteLine(job.ToString());
+            });    
+        }
+        private void _createWorker(String jobType, JobHandler handleJob)
+        {
+            Client.NewWorker()
+                    .JobType(jobType)
+                    .Handler(handleJob)
+                    .MaxJobsActive(5)
+                    .Name(jobType)
+                    .AutoCompletion()
+                    .PollInterval(TimeSpan.FromSeconds(50))
+                    .Timeout(TimeSpan.FromSeconds(10))
+                    .Open();
         }
         public IConfiguration Configuration { get; set; }
     }

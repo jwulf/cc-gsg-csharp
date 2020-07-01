@@ -97,6 +97,8 @@ namespace Cloudstarter.Services
 
 [Video link](https://youtu.be/AOj64vzEZ_8?t=155)
 
+We will create a controller route at `/status` that retrieves the status and topology of the cluster.
+
 * Create a file `Controllers/ZeebeController.cs`, with the following content:
 
 ```c#
@@ -159,6 +161,8 @@ It should look like this:
 
 [Video Link](https://youtu.be/AOj64vzEZ_8?t=908)
 
+We need to copy the bpmn file into the build, so that it is available to our program at runtime.
+
 * Edit the `Cloudstarter.csproj` file, and add the following `ItemGroup`:
 
 ```xml
@@ -167,15 +171,29 @@ It should look like this:
 </ItemGroup>
 ```
 
+Now we create a method in our service to deploy a bpmn model to the cluster.
+
 * Edit `ZeebeService.cs`, and add a `Deploy` method:
 
 ```c#
-public Task<IDeployResponse> Deploy()
+public Task<IDeployResponse> Deploy(string modelFile)
 {
-    var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", "test-process.bpmn");
+    var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFile);
     return Client.NewDeployCommand().AddResourceFile(filename).Send();
 }
 ```
+
+* In the `ZeebeService.cs` file, update the interface definition:
+
+```c#
+public interface IZeebeService
+{
+    public Task<IDeployResponse> Deploy(string modelFile);
+    public Task<ITopology> Status();
+}
+```
+
+Now, we call the `Deploy` method during the initialization of the service at startup.
 
 * Edit `Startup.cs`, make the `Configure` method `async`, and add the following lines:
 
@@ -183,7 +201,7 @@ public Task<IDeployResponse> Deploy()
 public async void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 {
     var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
-    var deployment = (await zeebeService.Deploy())?.Workflows[0];
+    var deployment = (await zeebeService.Deploy("test-process.bpmn"))?.Workflows[0];
     await Console.Out.WriteLineAsync("\nDeployed BPMN Model: " + deployment?.BpmnProcessId + " v." + deployment?.Version);
     // ...
 }
@@ -192,35 +210,54 @@ public async void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 
 [Video Link](https://youtu.be/AOj64vzEZ_8?t=1037)
 
-* Edit the `src/main/kotlin/io.camunda/CloudStarterApplication.kt` file, and add a REST method to start an instance
-of the workflow:
+We will create a controller route at `/start` that will start a new instance of the workflow.
 
-```kotlin
-// ...
-class CloudStarterApplication {
-    // ...
+* Edit `Services/ZeebeService.cs` and add a `StartWorkflowInstance` method:
 
-	@GetMapping("/start")
-	fun startWorkflowInstance(): String? {
-		val workflowInstanceEvent = client!!
-				.newCreateInstanceCommand()
-				.bpmnProcessId("test-process")
-				.latestVersion()
-				.send()
-				.join()
-		return workflowInstanceEvent.toString()
-	}
+```c#
+public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId)
+{
+    return Client.NewCreateWorkflowInstanceCommand().BpmnProcessId(bpmProcessId).LatestVersion().Send();
 }
 ```
 
-* Run the program with the command: `mvn spring-boot:run`.
+* Update the service interface definition:
 
-* Visit [http://localhost:8080/start](http://localhost:8080/start) in your browser.
+```c#
+public interface IZeebeService
+{
+    public Task<IDeployResponse> Deploy(string modelFile);
+    public Task<ITopology> Status();
+    public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId);
+}
+```
+
+* Edit `Controllers/ZeebeController.cs`, and add a REST method to start an instance
+of the workflow:
+
+```c#
+// ...
+public class ZeebeController : Controller
+    // ...
+
+    [Route("/start")]
+    [HttpGet]
+    public async Task<string> StartWorkflowInstance()
+    {
+        var instance = await _zeebeService.StartWorkflowInstance("test-process");
+        return "Started instance " + instance.WorkflowInstanceKey + " of " + instance.BpmnProcessId;
+    }
+}
+```
+
+* Run the program with the command: `dotnet run`.
+
+* Visit [http://localhost:5001/start](http://localhost:5001/start) in your browser.
 
 You will see output similar to the following: 
 
 ```
-CreateWorkflowInstanceResponseImpl{workflowKey=2251799813685249, bpmnProcessId='test-process', version=1, workflowInstanceKey=2251799813698314}
+Started instance 2251799813700699 of test-process
 ``` 
 
 A workflow instance has been started. Let's view it in Operate.

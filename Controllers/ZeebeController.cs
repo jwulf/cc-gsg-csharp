@@ -22,5 +22,13 @@ namespace Cloudstarter.Controllers
         {
             return (await _zeebeService.Status()).ToString();
         }
+        
+        [Route("/start")]
+        [HttpGet]
+        public async Task<string> StartWorkflowInstance()
+        {
+            var instance = await _zeebeService.StartWorkflowInstance("test-process");
+            return "Started instance " + instance.WorkflowInstanceKey + " of " + instance.BpmnProcessId;
+        }
     }
 }

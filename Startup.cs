@@ -28,12 +28,19 @@ namespace Cloudstarter
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public async void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
             var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
-            var deployment = (await zeebeService.Deploy())?.Workflows[0];
-            await Console.Out.WriteLineAsync("\nDeployed BPMN Model: " + deployment?.BpmnProcessId + " v." + deployment?.Version);
+            var deployment = (zeebeService.Deploy("test-process.bpmn")); //?.Workflows[0];
+            deployment.ContinueWith(antecedent =>
+            {
+                var res = antecedent.Result?.Workflows[0];
+                Console.Out.WriteLine("\nDeployed BPMN Model: " + res?.BpmnProcessId +
+                                      " v." + res?.Version);
+            });
             
+            zeebeService.CreateGetTimeWorker();
+
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
