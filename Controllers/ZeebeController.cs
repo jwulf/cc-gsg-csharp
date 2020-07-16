@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using Cloudstarter.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using fastJSON;
 
 namespace Cloudstarter.Controllers
 {
@@ -28,7 +29,7 @@ namespace Cloudstarter.Controllers
         public async Task<string> StartWorkflowInstance()
         {
             var instance = await _zeebeService.StartWorkflowInstance("test-process");
-            return "Started instance " + instance.WorkflowInstanceKey + " of " + instance.BpmnProcessId;
+            return instance;
         }
     }
 }

@@ -11,7 +11,7 @@ namespace Cloudstarter
 {
     public class Startup
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private static readonly Logger logger = LogManager.GetCurrentClassLogger();
 
         public Startup(IConfiguration configuration)
         {
@@ -31,15 +31,8 @@ namespace Cloudstarter
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
             var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
-            var deployment = (zeebeService.Deploy("test-process.bpmn")); //?.Workflows[0];
-            deployment.ContinueWith(antecedent =>
-            {
-                var res = antecedent.Result?.Workflows[0];
-                Console.Out.WriteLine("\nDeployed BPMN Model: " + res?.BpmnProcessId +
-                                      " v." + res?.Version);
-            });
-            
-            zeebeService.CreateGetTimeWorker();
+
+            zeebeService.Deploy("test-process.bpmn");
 
             if (env.IsDevelopment())
             {

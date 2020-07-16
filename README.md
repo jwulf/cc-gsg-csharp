@@ -26,6 +26,84 @@ cd Cloudstarter
 ```bash
 dotnet add package zb-client --version 0.16.1
 ```
+
+## Configure NLog for logging 
+
+* Install NLog packages (we'll use NLog):
+
+```bash
+dotnet add package NLog 
+dotnet add package NLog.Schema 
+dotnet add package NLog.Web.AspNetCore 
+```
+
+* Create a file `NLog.config.xml`, with the following content:
+
+```xml
+<?xml version="1.0" encoding="utf-8" ?>
+<nlog xmlns="http://www.nlog-project.org/schemas/NLog.xsd" 
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      autoReload="true"
+>
+    <extensions>
+        <add assembly="NLog.Web.AspNetCore"/>
+    </extensions>
+    
+    <targets>
+        <target name="logconsole" xsi:type="Console" 
+                layout="${longdate} | ${level:uppercase=true} | ${logger} | ${message} ${exception:format=tostring}"/>
+     </targets>
+    
+    <rules>
+       <logger name="*" minlevel="Trace" writeTo="logconsole" />
+     </rules>
+</nlog>
+```
+
+* Edit the file `Cloudstarter.csproj`, and add the following `ItemGroup` setting, to copy the log configuration into the build:
+
+```xml
+<ItemGroup>
+    <None Update="NLog.config.xml"  CopyToOutputDirectory="PreserveNewest" />
+</ItemGroup>
+```
+
+* Edit the file `Program.cs` to configure NLog:
+
+```c#
+public class Program
+{
+    public static async Task Main(string[] args)
+    {
+        var logger = NLogBuilder.ConfigureNLog("NLog.config.xml").GetCurrentClassLogger();
+        try
+        {
+            logger.Debug("init main");
+            await CreateHostBuilder(args).Build().RunAsync();
+        }
+        catch (Exception exception)
+        {
+            logger.Error(exception, "Stopped program because of exception");
+            throw;
+        }
+        finally
+        {
+            NLog.LogManager.Shutdown();
+        }
+    }
+
+    private static IHostBuilder CreateHostBuilder(string[] args) =>
+        Host.CreateDefaultBuilder(args)
+            .ConfigureWebHostDefaults(webBuilder => { webBuilder.UseStartup<Startup>(); })
+            .ConfigureLogging(logging =>
+            {
+                logging.ClearProviders();
+                logging.SetMinimumLevel(LogLevel.Trace);
+            })
+            .UseNLog();  
+}
+```
+
 [Video link](https://youtu.be/AOj64vzEZ_8?t=95)
 
 ## Create Camunda Cloud cluster
@@ -53,10 +131,11 @@ namespace Cloudstarter.Services
     public class ZeebeService: IZeebeService
     {
         public readonly IZeebeClient Client;
-        public readonly Logger Logger;
+        private readonly ILogger<ZeebeService> _logger;
 
-        public ZeebeService(IConfiguration configuration)
+        public ZeebeService(IConfiguration configuration, ILogger<ZeebeService> logger)
         {
+            _logger = logger;
             var authServer = configuration["ZEEBE_AUTHORIZATION_SERVER_URL"];
             var clientId = configuration["ZEEBE_CLIENT_ID"];
             var clientSecret = configuration["ZEEBE_CLIENT_SECRET"];
@@ -135,7 +214,9 @@ public void ConfigureServices(IServiceCollection services)
 
 * Run the application with the command `dotnet run` (remember to set the client connection variables in the environment first).
 
-* Open [http://localhost:5001/status](http://localhost:5001/status) in your web browser.
+Note: you can use `dotnet watch run` to automatically restart your application when you change your code.
+
+* Open [http://localhost:5000/status](http://localhost:5000/status) in your web browser.
 
 You will see the topology response from the cluster.
 
@@ -163,7 +244,7 @@ It should look like this:
 
 We need to copy the bpmn file into the build, so that it is available to our program at runtime.
 
-* Edit the `Cloudstarter.csproj` file, and add the following `ItemGroup`:
+* Edit the `Cloudstarter.csproj` file, and add the following to the `ItemGroup`:
 
 ```xml
 <ItemGroup>
@@ -179,7 +260,11 @@ Now we create a method in our service to deploy a bpmn model to the cluster.
 public Task<IDeployResponse> Deploy(string modelFile)
 {
     var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFile);
-    return Client.NewDeployCommand().AddResourceFile(filename).Send();
+    var deployment = await _client.NewDeployCommand().AddResourceFile(filename).Send();
+    var res = deployment.Workflows[0];
+    _logger.LogInformation("Deployed BPMN Model: " + res?.BpmnProcessId +
+                " v." + res?.Version);
+    return deployment;
 }
 ```
 
@@ -195,14 +280,13 @@ public interface IZeebeService
 
 Now, we call the `Deploy` method during the initialization of the service at startup.
 
-* Edit `Startup.cs`, make the `Configure` method `async`, and add the following lines:
+* Edit `Startup.cs`, and add the following lines to the `Configure` method:
 
 ```c#
-public async void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 {
     var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
-    var deployment = (await zeebeService.Deploy("test-process.bpmn"))?.Workflows[0];
-    await Console.Out.WriteLineAsync("\nDeployed BPMN Model: " + deployment?.BpmnProcessId + " v." + deployment?.Version);
+    zeebeService.Deploy("test-process.bpmn"); 
     // ...
 }
 ```
@@ -212,12 +296,23 @@ public async void Configure(IApplicationBuilder app, IWebHostEnvironment env)
 
 We will create a controller route at `/start` that will start a new instance of the workflow.
 
+* Add fastJSON to the project:
+
+```bash
+dotnet add fastJSON
+```
+
 * Edit `Services/ZeebeService.cs` and add a `StartWorkflowInstance` method:
 
 ```c#
-public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId)
+public async Task<String> StartWorkflowInstance(string bpmProcessId)
 {
-    return Client.NewCreateWorkflowInstanceCommand().BpmnProcessId(bpmProcessId).LatestVersion().Send();
+    var instance = await _client.NewCreateWorkflowInstanceCommand()
+            .BpmnProcessId(bpmProcessId)
+            .LatestVersion()
+            .Send();
+    var jsonParams = new JSONParameters {ShowReadOnlyProperties = true};
+    return JSON.ToJSON(instance, jsonParams);
 }
 ```
 
@@ -228,7 +323,7 @@ public interface IZeebeService
 {
     public Task<IDeployResponse> Deploy(string modelFile);
     public Task<ITopology> Status();
-    public Task<IWorkflowInstanceResponse> StartWorkflowInstance(string bpmProcessId);
+    public Task<String> StartWorkflowInstance(string bpmProcessId);
 }
 ```
 
@@ -245,19 +340,19 @@ public class ZeebeController : Controller
     public async Task<string> StartWorkflowInstance()
     {
         var instance = await _zeebeService.StartWorkflowInstance("test-process");
-        return "Started instance " + instance.WorkflowInstanceKey + " of " + instance.BpmnProcessId;
+        return instance;
     }
 }
 ```
 
 * Run the program with the command: `dotnet run`.
 
-* Visit [http://localhost:5001/start](http://localhost:5001/start) in your browser.
+* Visit [http://localhost:5000/start](http://localhost:5000/start) in your browser.
 
 You will see output similar to the following: 
 
 ```
-Started instance 2251799813700699 of test-process
+{"$types":{"Zeebe.Client.Impl.Responses.WorkflowInstanceResponse, Client, Version=0.16.1.0, Culture=neutral, PublicKeyToken=null":"1"},"$type":"1","WorkflowKey":2251799813685454,"BpmnProcessId":"test-process","Version":3,"WorkflowInstanceKey":2251799813686273}
 ``` 
 
 A workflow instance has been started. Let's view it in Operate.
@@ -280,31 +375,54 @@ Let's create a task worker to serve the job represented by this task.
 
 We will create a worker program that logs out the job metadata, and completes the job with success.
 
-* Edit the `src/main/kotlin/io.camunda/CloudStarterApplication.kt` file, and add a REST method to start an instance
-of the workflow:
+* Edit the `Services/ZeebeService.cs` file, and add a `_createWorker` method to the `ZeebeService` class:
 
-```kotlin
+```c#
 // ...
-class CloudStarterApplication {
-    var logger: Logger = LoggerFactory.getLogger(javaClass)
-
-    // ...
-	@ZeebeWorker(type = "get-time")
-	fun handleGetTime(client: JobClient, job: ActivatedJob) {
-		logger.info(job.toString())
-		client.newCompleteCommand(job.getKey())
-				.send().join()
-	}
+private void _createWorker(String jobType, JobHandler handleJob)
+{
+    _client.NewWorker()
+            .JobType(jobType)
+            .Handler(handleJob)
+            .MaxJobsActive(5)
+            .Name(jobType)
+            .PollInterval(TimeSpan.FromSeconds(50))
+            .PollingTimeout(TimeSpan.FromSeconds(50))
+            .Timeout(TimeSpan.FromSeconds(10))
+            .Open();
 }
 ```
 
-* Run the worker program with the command: `mvn spring-boot:run`.
+* Now add a `CreateGetTimeWorker` method, where we supply the task-type for the worker, and a job handler function:
+
+```c#
+public void CreateGetTimeWorker()
+{
+    _createWorker("get-time", async (client, job) =>
+    {
+        _logger.LogInformation("Received job: " + job);
+        await client.NewCompleteJobCommand(job.Key).Send();
+    });    
+}
+```
+The worker handler function is `async` so that it runs on its own thread.
+
+* Now call this method in the `ZeebeService` constructor:
+
+```c#
+ public ZeebeService(IConfiguration config, ILogger<ZeebeService> logger)
+{
+   //...
+    CreateGetTimeWorker();
+}
+```
+* Run the worker program with the command: `dotnet run`.
 
 You will see output similar to: 
 
 ```
-2020-06-29 09:33:40.420  INFO 5801 --- [ault-executor-1] io.zeebe.client.job.poller               : Activated 1 jobs for worker whatever and job type get-time
-2020-06-29 09:33:40.437  INFO 5801 --- [pool-2-thread-1] i.c.c.CloudStarterApplication            : {"key":2251799813698319,"type":"get-time","customHeaders":{},"workflowInstanceKey":2251799813698314,"bpmnProcessId":"test-process","workflowDefinitionVersion":1,"workflowKey":2251799813685249,"elementId":"Activity_1ucrvca","elementInstanceKey":2251799813698318,"worker":"whatever","retries":3,"deadline":1593380320176,"variables":"{}","variablesAsMap":{}}
+2020-07-16 20:34:25.4971 | DEBUG | Zeebe.Client.Impl.Worker.JobWorker | Job worker (get-time) activated 1 of 5 successfully. 
+2020-07-16 20:34:25.4971 | INFO | Cloudstarter.Services.ZeebeService | Received job: Key: 2251799813686173, Type: get-time, WorkflowInstanceKey: 2251799813686168, BpmnProcessId: test-process, WorkflowDefinitionVersion: 3, WorkflowKey: 2251799813685454, ElementId: Activity_1ucrvca, ElementInstanceKey: 2251799813686172, Worker: get-time, Retries: 3, Deadline: 07/16/2020 20:34:35, Variables: {}, CustomHeaders: {} 
 ```
 
 * Go back to Operate. You will see that the workflow instance is gone.
@@ -317,72 +435,70 @@ You will see the completed workflow instance.
 
 We will now create the workflow instance, and get the final outcome in the calling code.
 
-* Edit the `src/main/kotlin/io.camunda/CloudStarterApplication.kt` file, and edit the `startWorkflowInstance` method, 
-to make it look like this:
+* Edit the `ZeebeService.cs` file, and edit the `StartWorkflowInstance` method, to make it look like this:
 
-```kotlin
+```c#
 // ...
-class CloudStarterApplication {
-    // ...
-
-   	@GetMapping("/start")
-   	fun startWorkflowInstance(): String? {
-   		val workflowInstanceEvent = client!!
-   				.newCreateInstanceCommand()
-   				.bpmnProcessId("test-process")
-   				.latestVersion()
-   				.withResult()
-   				.send()
-   				.join()
-   		return workflowInstanceEvent.toString()
-   	}
+public async Task<String> StartWorkflowInstance(string bpmProcessId)
+{
+    var instance = await _client.NewCreateWorkflowInstanceCommand()
+                .BpmnProcessId(bpmProcessId)
+                .LatestVersion()
+                .WithResult()
+                .Send();
+    var jsonParams = new JSONParameters {ShowReadOnlyProperties = true};
+    return JSON.ToJSON(instance, jsonParams);
 }
 ```
 
-* Run the program with the command: `mvn spring-boot:run`.
+* Run the program with the command: `dotnet run`.
 
-* Visit [http://localhost:8080/start](http://localhost:8080/start) in your browser.
+* Visit [http://localhost:5000/start](http://localhost:5000/start) in your browser.
 
 You will see output similar to the following:
 
 ```
-CreateWorkflowInstanceWithResultResponseImpl{workflowKey=2251799813685249, bpmnProcessId='test-process', version=1, workflowInstanceKey=2251799813698527, variables='{}'}
+{"$types":{"Zeebe.Client.Impl.Responses.WorkflowInstanceResultResponse, Client, Version=0.16.1.0, Culture=neutral, PublicKeyToken=null":"1"},"$type":"1","WorkflowKey":2251799813686366,"BpmnProcessId":"test-process","Version":4,"WorkflowInstanceKey":2251799813686409,"Variables":"{}"}
 ```
 
 ## Call a REST Service from the Worker 
 
 [Video link](https://youtu.be/AOj64vzEZ_8?t=1426)
 
-* Edit the `src/main/kotlin/io.camunda/CloudStarterApplication.kt` file, and edit the `handleGetTime` method, 
-to make it look like this:
+We are going to make a REST call in the worker handler, to query a remote API for the current GMT time.
 
-```kotlin
+* Edit the `ZeebeService.cs` file, and edit the `CreateGetTimeWorker` method, to make it look like this:
+
+```c#
 // ...
-class CloudStarterApplication {
-    // ...
-
-		@ZeebeWorker(type = "get-time")
-    	fun handleGetTime(client: JobClient, job: ActivatedJob) {
-    		logger.info(job.toString())
-    		val uri = "https://json-api.joshwulf.com/time"
-    
-    		val restTemplate = RestTemplate()
-    		val result = restTemplate.getForObject(uri, String::class.java)!!
-    
-    		client.newCompleteCommand(job.key)
-    				.variables("{\"time\":$result}")
-    				.send().join()
-    	}
+public void CreateGetTimeWorker()
+{
+    _createWorker("get-time", async (client, job) =>
+    {
+        _logger.LogInformation("Received job: " + job);
+            using (var httpClient = new HttpClient())
+            {
+                using (var response = await httpClient.GetAsync("https://json-api.joshwulf.com/time"))
+                {
+                    string apiResponse = await response.Content.ReadAsStringAsync();
+                    
+                    await client.NewCompleteJobCommand(job.Key)
+                        .Variables("{\"time\":" + apiResponse + "}")
+                        .Send();
+                }
+            }
+    });    
 }
+// ...
 ```
 
-* Run the program with the command: `mvn spring-boot:run`.
-* Visit [http://localhost:8080/start](http://localhost:8080/start) in your browser.
+* Run the program with the command: `dotnet run`.
+* Visit [http://localhost:5000/start](http://localhost:5000/start) in your browser.
 
 You will see output similar to the following:
 
 ```
-CreateWorkflowInstanceWithResultResponseImpl{workflowKey=2251799813685249, bpmnProcessId='test-process', version=1, workflowInstanceKey=2251799813698527, variables='{"time":{"time":"Sun, 28 Jun 2020 21:49:48 GMT","hour":21,"minute":49,"second":48,"day":0,"month":5,"year":2020}}'}
+{"$types":{"Zeebe.Client.Impl.Responses.WorkflowInstanceResultResponse, Client, Version=0.16.1.0, Culture=neutral, PublicKeyToken=null":"1"},"$type":"1","WorkflowKey":2251799813686366,"BpmnProcessId":"test-process","Version":4,"WorkflowInstanceKey":2251799813686463,"Variables":"{\"time\":{\"time\":\"Thu, 16 Jul 2020 10:26:13 GMT\",\"hour\":10,\"minute\":26,\"second\":13,\"day\":4,\"month\":6,\"year\":2020}}"}
 ```
 
 ## Make a Decision 
@@ -402,7 +518,7 @@ We will edit the model to add a Conditional Gateway.
 * Under _Details_ enter the following in _Condition expression_: 
 
 ```
-=time.hour >=0 and time.hour <=12
+=time.hour >=0 and time.hour <=11
 ```
 
 * Click on the arrow connecting the Gateway to the _After noon_ task. 
@@ -417,65 +533,84 @@ It should look like this:
 
 [Video link](https://youtu.be/AOj64vzEZ_8?t=2081)
 
-We will create a second worker that takes the custom header and applies it to the variables in the workflow.
+We will create a second worker that combines the value of a custom header with the value of a variable in the workflow.
 
-* Edit the `src/main/kotlin/io.camunda/CloudStarterApplication.kt` file, and add the `handleMakeGreeting` method, 
-to make it look like this:
+* Edit the `ZeebeService.cs` file and create a couple of DTO classes to aid with deserialization of the job:
 
-```kotlin
-// ...
-class CloudStarterApplication {
-    // ...
+```c#
+public class MakeGreetingCustomHeadersDTO
+{
+    public string greeting { get; set; }
+}
 
-	@ZeebeWorker(type = "make-greeting")
-	fun handleMakeGreeting(client: JobClient, job: ActivatedJob) {
-		val headers = job.customHeaders
-		val greeting = headers.getOrDefault("greeting", "Good day")
-		val variablesAsMap = job.variablesAsMap
-		val name = variablesAsMap.getOrDefault("name", "there") as String
-		val say = "$greeting $name"
-		client.newCompleteCommand(job.key)
-				.variables("{\"say\": \"$say\"}")
-				.send().join()
-	}
+public class MakeGreetingVariablesDTO
+{
+    public string name { get; set; }
+}
+```
+ 
+ 
+* In the same file, create a `CreateMakeGreetingWorker` method:
+
+```c#
+ public void CreateMakeGreetingWorker()
+{
+    _createWorker("make-greeting", async (client, job) =>
+    {
+        _logger.LogInformation("Make Greeting Received job: " + job);
+        var headers = JSON.ToObject<MakeGreetingCustomHeadersDTO>(job.CustomHeaders);
+        var variables = JSON.ToObject<MakeGreetingVariablesDTO>(job.Variables);
+        string greeting = headers.greeting;
+        string name = variables.name;
+
+        await client.NewCompleteJobCommand(job.Key)
+            .Variables("{\"say\": \"" + greeting + " " + name + "\"}")
+            .Send();
+        _logger.LogInformation("Make Greeting Worker completed job");
+    });    
 }
 ```
 
-* Edit the `startWorkflowInstance` method, and make it look like this:
+* Now call this method in the `ZeebeService` constructor:
 
-```kotlin
+```c#
+ public ZeebeService(IConfiguration config, ILogger<ZeebeService> logger)
+{
+   //...
+    CreateGetTimeWorker();
+    CreateMakeGreetingWorker();
+}
+```
+
+* Edit the `startWorkflowInstance` method, and pass in a variable `name` when you create the workflow:
+
+```c#
 // ...
-class CloudStarterApplication {
-    // ...
-	@GetMapping("/start")
-	fun startWorkflowInstance(): String? {
-		val workflowInstanceResult = client!!
-				.newCreateInstanceCommand()
-				.bpmnProcessId("test-process")
-				.latestVersion()
-				.variables("{\"name\": \"Josh Wulf\"}")
-				.withResult()
-				.send()
-				.join()
-		return workflowInstanceResult
-				.variablesAsMap
-				.getOrDefault("say", "Error: No greeting returned") as String?
-	}
+public async Task<String> StartWorkflowInstance(string bpmProcessId)
+{
+    var instance = await _client.NewCreateWorkflowInstanceCommand()
+        .BpmnProcessId(bpmProcessId)
+        .LatestVersion()
+        .Variables("{\"name\": \"Josh Wulf\"}")
+        .WithResult()
+        .Send();
+    var jsonParams = new JSONParameters {ShowReadOnlyProperties = true};
+    return JSON.ToJSON(instance, jsonParams);
 }
 ```
 
 You can change the variable `name` value to your own name (or derive it from the url path or a parameter).
 
-* Run the program with the command: `mvn spring-boot:run`.
-* Visit [http://localhost:8080/start](http://localhost:8080/start) in your browser.
+* Run the program with the command: `dotnet run`.
+* Visit [http://localhost:5000/start](http://localhost:5000/start) in your browser.
 
 You will see output similar to the following:
 
 ```
-Good Morning Josh Wulf
+{"$types":{"Zeebe.Client.Impl.Responses.WorkflowInstanceResultResponse, Client, Version=0.16.1.0, Culture=neutral, PublicKeyToken=null":"1"},"$type":"1","WorkflowKey":2251799813686683,"BpmnProcessId":"test-process","Version":5,"WorkflowInstanceKey":2251799813687157,"Variables":"{\"say\":\"Good Afternoon Josh Wulf\",\"name\":\"Josh Wulf\",\"time\":{\"time\":\"Thu, 16 Jul 2020 12:45:33 GMT\",\"hour\":12,\"minute\":45,\"second\":33,\"day\":4,\"month\":6,\"year\":2020}}"}
 ```
 
 ## Profit!
 
-Congratulations. You've completed the Getting Started Guide for Camunda Cloud using Kotlin with Spring.
+Congratulations. You've completed the Getting Started Guide for Camunda Cloud using C# and ASP .NET Core.
 
