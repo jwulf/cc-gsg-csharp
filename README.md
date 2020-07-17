@@ -1,4 +1,4 @@
-# Getting Started with Camunda Cloud using C#
+# Getting Started with Camunda Cloud using C# and ASP .NET Core 3
 
 The [Zeebe C# Client](https://github.com/zeebe-io/zeebe-client-csharp) is available for .NET Zeebe applications. 
 
@@ -130,7 +130,7 @@ namespace Cloudstarter.Services
     }
     public class ZeebeService: IZeebeService
     {
-        public readonly IZeebeClient Client;
+        private readonly IZeebeClient _client;
         private readonly ILogger<ZeebeService> _logger;
 
         public ZeebeService(IConfiguration configuration, ILogger<ZeebeService> logger)
@@ -146,7 +146,7 @@ namespace Cloudstarter.Services
             };
             var audience = zeebeUrl?.TrimEnd(port);
 
-            Client =
+            _client =
                 ZeebeClient.Builder()
                     .UseGatewayAddress(zeebeUrl)
                     .UseTransportEncryption()
@@ -162,7 +162,7 @@ namespace Cloudstarter.Services
 
         public Task<ITopology> Status()
         {
-            return Client.TopologyRequest().Send();
+            return _client.TopologyRequest().Send();
         }
     }
 }
@@ -278,7 +278,7 @@ public interface IZeebeService
 }
 ```
 
-Now, we call the `Deploy` method during the initialization of the service at startup.
+Now, we call the `Deploy` method during the initialization of the service at startup. We need to do it here, because the service is not instantiated 
 
 * Edit `Startup.cs`, and add the following lines to the `Configure` method:
 
@@ -407,16 +407,40 @@ public void CreateGetTimeWorker()
 ```
 The worker handler function is `async` so that it runs on its own thread.
 
-* Now call this method in the `ZeebeService` constructor:
+* Now create a method `StartWorkers`:
 
 ```c#
- public ZeebeService(IConfiguration config, ILogger<ZeebeService> logger)
+public void StartWorkers()
 {
-   //...
     CreateGetTimeWorker();
 }
 ```
-* Run the worker program with the command: `dotnet run`.
+
+* And add it to the `IZeebeService` interface:
+
+```c#
+public interface IZeebeService
+{
+    public Task<IDeployResponse> Deploy(string modelFile);
+    public Task<ITopology> Status();
+    public Task<string> StartWorkflowInstance(string bpmProcessId);
+    public void StartWorkers();
+}
+```
+* Now call this method in the `Configure` method in `Startup.cs`:
+
+```c#
+public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+{
+    var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
+
+    zeebeService.Deploy("test-process.bpmn");
+    zeebeService.StartWorkers();
+    // ...
+}
+```
+
+* Run the program with the command: `dotnet run`.
 
 You will see output similar to: 
 

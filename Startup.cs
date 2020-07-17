@@ -33,6 +33,7 @@ namespace Cloudstarter
             var zeebeService = app.ApplicationServices.GetService<IZeebeService>();
 
             zeebeService.Deploy("test-process.bpmn");
+            zeebeService.StartWorkers();
 
             if (env.IsDevelopment())
             {

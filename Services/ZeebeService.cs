@@ -20,6 +20,7 @@ namespace Cloudstarter.Services
         public Task<IDeployResponse> Deploy(string modelFile);
         public Task<ITopology> Status();
         public Task<string> StartWorkflowInstance(string bpmProcessId);
+        public void StartWorkers();
     }
 
     public class MakeGreetingCustomHeadersDto
@@ -64,7 +65,6 @@ namespace Cloudstarter.Services
                             .UseAudience(audience)
                             .Build())
                     .Build();
-            StartWorkers();
         }
 
         public void StartWorkers()
