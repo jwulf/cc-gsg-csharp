@@ -288,7 +288,7 @@ Now we create a method in our service to deploy a bpmn model to the cluster.
 * Edit `ZeebeService.cs`, and add a `Deploy` method:
 
 ```c#
-public Task<IDeployResponse> Deploy(string modelFile)
+public async Task<IDeployResponse> Deploy(string modelFile)
 {
     var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFile);
     var deployment = await _client.NewDeployCommand().AddResourceFile(filename).Send();
