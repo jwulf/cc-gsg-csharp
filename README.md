@@ -288,9 +288,9 @@ Now we create a method in our service to deploy a bpmn model to the cluster.
 * Edit `ZeebeService.cs`, and add a `Deploy` method:
 
 ```c#
-public async Task<IDeployResponse> Deploy(string modelFile)
+public async Task<IDeployResponse> Deploy(string modelFilename)
 {
-    var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFile);
+    var filename = Path.Combine(AppDomain.CurrentDomain.BaseDirectory!, "Resources", modelFilename);
     var deployment = await _client.NewDeployCommand().AddResourceFile(filename).Send();
     var res = deployment.Workflows[0];
     _logger.LogInformation("Deployed BPMN Model: " + res?.BpmnProcessId +
@@ -304,7 +304,7 @@ public async Task<IDeployResponse> Deploy(string modelFile)
 ```c#
 public interface IZeebeService
 {
-    public Task<IDeployResponse> Deploy(string modelFile);
+    public Task<IDeployResponse> Deploy(string modelFilename);
     public Task<ITopology> Status();
 }
 ```
