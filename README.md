@@ -37,7 +37,7 @@ dotnet add package NLog.Schema
 dotnet add package NLog.Web.AspNetCore 
 ```
 
-* Create a file `NLog.config.xml`, with the following content:
+* Create a file `NLog.config`, with the following content:
 
 ```xml
 <?xml version="1.0" encoding="utf-8" ?>
@@ -58,14 +58,6 @@ dotnet add package NLog.Web.AspNetCore
        <logger name="*" minlevel="Trace" writeTo="logconsole" />
      </rules>
 </nlog>
-```
-
-* Edit the file `Cloudstarter.csproj`, and add the following `ItemGroup` setting, to copy the log configuration into the build:
-
-```xml
-<ItemGroup>
-    <None Update="NLog.config.xml"  CopyToOutputDirectory="PreserveNewest" />
-</ItemGroup>
 ```
 
 * Edit the file `Program.cs` to configure NLog:
@@ -119,6 +111,45 @@ public class Program
 
 [Video link](https://youtu.be/AOj64vzEZ_8?t=454)
 
+* Add the `dotenv.net` package to the project:
+
+```bash
+dotnet add package dotenv.net.DependencyInjection.Microsoft
+```
+
+* Edit `Startup.cs` and add the service in the `ConfigureServices` method: 
+
+```c#
+public void ConfigureServices(IServiceCollection services)
+{
+    // ...
+    services.AddEnv(builder => {
+        builder
+            .AddEnvFile(".env")
+            .AddThrowOnError(false)
+            .AddEncoding(Encoding.ASCII);
+    });
+    services.AddEnvReader();
+}
+```
+
+* Create a file in the root of the project `.env`, and paste the client connection details into it, removing the `export` from each line:
+
+```bash
+ZEEBE_ADDRESS='656a9fc4-c874-49a3-b67b-20c31ae12fa0.zeebe.camunda.io:443'
+ZEEBE_CLIENT_ID='~2WQlDeV1yFdtePBRQgsrNXaKMs4IwAw'
+ZEEBE_CLIENT_SECRET='3wFRuCJb4YPcKL4W9Fn7kXlsepSNNJI5h7Mlkqxk2E.coMEtYdA5E58lnkCmoN_0'
+ZEEBE_AUTHORIZATION_SERVER_URL='https://login.cloud.camunda.io/oauth/token'
+```
+
+* Add an `ItemGroup` in `CloudStarter.csproj` to copy the `.env` file into the build:
+
+```xml
+<ItemGroup>
+    <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
+</ItemGroup>
+```
+
 * Create a file in `Services/ZeebeService.cs`, with the following content:
 
 ```c#
@@ -133,13 +164,13 @@ namespace Cloudstarter.Services
         private readonly IZeebeClient _client;
         private readonly ILogger<ZeebeService> _logger;
 
-        public ZeebeService(IConfiguration configuration, ILogger<ZeebeService> logger)
+        public ZeebeService(IEnvReader envReader, ILogger<ZeebeService> logger)
         {
             _logger = logger;
-            var authServer = configuration["ZEEBE_AUTHORIZATION_SERVER_URL"];
-            var clientId = configuration["ZEEBE_CLIENT_ID"];
-            var clientSecret = configuration["ZEEBE_CLIENT_SECRET"];
-            var zeebeUrl = configuration["ZEEBE_ADDRESS"];
+            var authServer = envReader.GetStringValue("ZEEBE_AUTHORIZATION_SERVER_URL"); 
+            var clientId = envReader.GetStringValue("ZEEBE_CLIENT_ID");
+            var clientSecret = envReader.GetStringValue("ZEEBE_CLIENT_SECRET");
+            var zeebeUrl = envReader.GetStringValue("ZEEBE_ADDRESS");
             char[] port =
             {
                 '4', '3', ':'
@@ -169,8 +200,6 @@ namespace Cloudstarter.Services
 ```
 
 * Save the file.
-
-* Copy the client connection credentials for your cluster from the Camunda Cloud Console, and set them in your environment.
 
 ## Test Connection with Camunda Cloud
 
