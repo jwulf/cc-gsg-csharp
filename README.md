@@ -125,7 +125,7 @@ public void ConfigureServices(IServiceCollection services)
     // ...
     services.AddEnv(builder => {
         builder
-            .AddEnvFile(".env")
+            .AddEnvFile("CamundaCloud.env")
             .AddThrowOnError(false)
             .AddEncoding(Encoding.ASCII);
     });
@@ -133,20 +133,22 @@ public void ConfigureServices(IServiceCollection services)
 }
 ```
 
-* Create a file in the root of the project `.env`, and paste the client connection details into it, removing the `export` from each line:
+* Create a file in the root of the project `CamundaCloud.env`, and paste the client connection details into it, removing the `export` from each line:
 
 ```bash
-ZEEBE_ADDRESS='656a9fc4-c874-49a3-b67b-20c31ae12fa0.zeebe.camunda.io:443'
-ZEEBE_CLIENT_ID='~2WQlDeV1yFdtePBRQgsrNXaKMs4IwAw'
-ZEEBE_CLIENT_SECRET='3wFRuCJb4YPcKL4W9Fn7kXlsepSNNJI5h7Mlkqxk2E.coMEtYdA5E58lnkCmoN_0'
-ZEEBE_AUTHORIZATION_SERVER_URL='https://login.cloud.camunda.io/oauth/token'
+ZEEBE_ADDRESS=656a9fc4-c874-49a3-b67b-20c31ae12fa0.zeebe.camunda.io:443
+ZEEBE_CLIENT_ID=~2WQlDeV1yFdtePBRQgsrNXaKMs4IwAw
+ZEEBE_CLIENT_SECRET=3wFRuCJb4YPcKL4W9Fn7kXlsepSNNJI5h7Mlkqxk2E.coMEtYdA5E58lnkCmoN_0
+ZEEBE_AUTHORIZATION_SERVER_URL=https://login.cloud.camunda.io/oauth/token
 ```
+
+**Note:** if you change cluster configuration at a later date, you may need to delete the file `~/zeebe/cloud.token`. See [this bug report](https://github.com/zeebe-io/zeebe-client-csharp/issues/146).
 
 * Add an `ItemGroup` in `CloudStarter.csproj` to copy the `.env` file into the build:
 
 ```xml
 <ItemGroup>
-    <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="CamundaCloud.env" CopyToOutputDirectory="PreserveNewest" />
 </ItemGroup>
 ```
 
