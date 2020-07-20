@@ -67,7 +67,7 @@ public class Program
 {
     public static async Task Main(string[] args)
     {
-        var logger = NLogBuilder.ConfigureNLog("NLog.config.xml").GetCurrentClassLogger();
+        var logger = NLogBuilder.ConfigureNLog("NLog.config").GetCurrentClassLogger();
         try
         {
             logger.Debug("init main");
