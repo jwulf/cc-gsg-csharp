@@ -330,7 +330,7 @@ We will create a controller route at `/start` that will start a new instance of 
 * Add fastJSON to the project:
 
 ```bash
-dotnet add fastJSON
+dotnet add package fastJSON
 ```
 
 * Edit `Services/ZeebeService.cs` and add a `StartWorkflowInstance` method:
