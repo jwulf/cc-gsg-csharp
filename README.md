@@ -626,12 +626,11 @@ public class MakeGreetingVariablesDTO
 }
 ```
 
-* Now call this method in the `ZeebeService` constructor:
+* Now call this method in the `StartWorkers` method of the `ZeebeService`:
 
 ```c#
- public ZeebeService(IConfiguration config, ILogger<ZeebeService> logger)
+public void StartWorkers()
 {
-   //...
     CreateGetTimeWorker();
     CreateMakeGreetingWorker();
 }
